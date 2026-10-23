@@ -29,7 +29,7 @@ st.caption(
     "Scaled Net Operating Assets (NOA)"
 )
 
-TICKERS = [
+TICKER = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "ORCL", "CRM", "AMD",
     "CSCO", "IBM", "QCOM", "TXN", "INTU", "ADBE", "NOW", "AMAT", "MU", "LRCX",
     "KLAC", "ADI", "PANW", "SNPS", "CDNS", "ANET", "APH", "MSI", "FTNT", "NXPI",
