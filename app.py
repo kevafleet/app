@@ -29,7 +29,34 @@ st.caption(
     "Scaled Net Operating Assets (NOA)"
 )
 
-import pandas as pd
+# Load company universe
+try:
+    df = pd.read_csv("universe.csv")
+except FileNotFoundError:
+    st.error(
+        "universe.csv was not found. Add it to the same GitHub "
+        "repository folder as app.py."
+    )
+    st.stop()
+except Exception as e:
+    st.error(f"Could not load universe.csv: {e}")
+    st.stop()
+
+# Clean column names
+df.columns = df.columns.astype(str).str.strip()
+
+if "Ticker" not in df.columns:
+    st.error(
+        f"universe.csv must have a Ticker column. "
+        f"Columns found: {df.columns.tolist()}"
+    )
+    st.stop()
+
+if "Sector" not in df.columns:
+    df["Sector"] = "Unknown"
+
+df["Ticker"] = df["Ticker"].astype(str).str.strip().str.upper()
+df = df.drop_duplicates(subset=["Ticker"])
 
 universe.to_csv("universe.csv", index=False)
 
