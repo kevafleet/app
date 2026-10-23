@@ -40,7 +40,7 @@ universe = pd.DataFrame({
 universe.to_csv("universe.csv", index=False)
 
 print(f"Saved {len(universe)} unique tickers.")
-
+unique_tickers = list(dict.fromkeys(FALLBACK_TICKERS))
 FALLBACK_TICKERS = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "ORCL", "CRM", "AMD",
     "CSCO", "IBM", "QCOM", "TXN", "INTU", "ADBE", "NOW", "AMAT", "MU", "LRCX",
