@@ -586,3 +586,137 @@ with st.expander("Data quality notes"):
         "Unknown sectors should be reviewed before analysis.\n"
         "- Yahoo Finance data fields and availability can change."
     )
+
+
+# SIDEBAR: ADJUSTABLE SCREENING RULES
+
+st.sidebar.header("BUY Candidate Rules")
+
+buy_max_pe = st.sidebar.slider(
+    "Maximum BUY P/E",
+    min_value=5.0,
+    max_value=80.0,
+    value=25.0,
+    step=1.0
+)
+
+buy_min_bm = st.sidebar.slider(
+    "Minimum BUY Book-to-Market",
+    min_value=0.0,
+    max_value=2.0,
+    value=0.30,
+    step=0.05
+)
+
+buy_max_snoa = st.sidebar.slider(
+    "Maximum BUY SNOA",
+    min_value=-0.5,
+    max_value=1.5,
+    value=0.50,
+    step=0.05
+)
+
+st.sidebar.header("SELL Candidate Rules")
+
+sell_min_snoa = st.sidebar.slider(
+    "High-SNOA SELL Threshold",
+    min_value=0.0,
+    max_value=2.0,
+    value=0.75,
+    step=0.05
+)
+
+sell_min_pe = st.sidebar.slider(
+    "High-P/E SELL Threshold",
+    min_value=5.0,
+    max_value=100.0,
+    value=40.0,
+    step=1.0
+)
+
+sell_max_bm = st.sidebar.slider(
+    "Low Book-to-Market SELL Threshold",
+    min_value=0.0,
+    max_value=1.0,
+    value=0.15,
+    step=0.05
+)
+
+# SCREEN THE DATA
+if "collected_data" in st.session_state and st.session_state.collected_data:
+    df = pd.DataFrame(st.session_state.collected_data)
+
+    # Ensure calculated metrics are numeric.
+    for col in ["P/E", "Book-to-Market", "SNOA", "Net Income"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        else:
+            df[col] = np.nan
+
+    valid = (
+        df["P/E"].notna()
+        & df["Book-to-Market"].notna()
+        & df["SNOA"].notna()
+    )
+
+    # SELL rules focus on accounting quality and expensive valuation.
+    df["SELL Candidate"] = (
+        (df["SNOA"] >= sell_min_snoa)
+        | (df["P/E"] >= sell_min_pe)
+        | (df["Book-to-Market"] <= sell_max_bm)
+    ) & valid
+
+    # BUY rules focus on valuation and lower SNOA.
+    df["BUY Candidate"] = (
+        (df["P/E"] > 0)
+        & (df["P/E"] <= buy_max_pe)
+        & (df["Book-to-Market"] >= buy_min_bm)
+        & (df["SNOA"] <= buy_max_snoa)
+        & (df["Net Income"] > 0)
+        & valid
+        & ~df["SELL Candidate"]
+    )
+
+    df["Signal"] = "HOLD / REVIEW"
+    df.loc[df["BUY Candidate"], "Signal"] = "BUY CANDIDATE"
+    df.loc[df["SELL Candidate"], "Signal"] = "SELL CANDIDATE"
+
+    st.header("Financial Screening Results")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Companies with data", int(valid.sum()))
+    c2.metric("BUY candidates", int(df["BUY Candidate"].sum()))
+    c3.metric("SELL candidates", int(df["SELL Candidate"].sum()))
+
+    st.subheader("BUY Candidates")
+    st.dataframe(
+        df.loc[df["BUY Candidate"]].sort_values("P/E"),
+        use_container_width=True
+    )
+
+    st.subheader("SELL Candidates")
+    st.dataframe(
+        df.loc[df["SELL Candidate"]].sort_values("SNOA", ascending=False),
+        use_container_width=True
+    )
+
+    st.subheader("All Companies")
+    st.dataframe(df, use_container_width=True)
+
+    # Show why financial data might be missing.
+    if "Data Status" in df.columns:
+        with st.expander("Inspect missing financial data"):
+            st.dataframe(
+                df.loc[~valid, [
+                    c for c in [
+                        "Ticker", "Company", "Data Status",
+                        "P/E", "Book-to-Market", "SNOA"
+                    ] if c in df.columns],
+                use_container_width=True
+            )
+
+else:
+    st.warning(
+        "No financial records have been collected yet. "
+        "Run the data collection step before screening."
+    )
