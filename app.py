@@ -178,34 +178,59 @@ except Exception as exc:
 # 2. FINANCIAL DATA COLLECTION
 # ---------------------------------------------------------
 
+
+# 2. FINANCIAL DATA COLLECTION
+# ---------------------------------------------------------
+
+import numpy as np
+import pandas as pd
+import yfinance as yf
+import streamlit as st
+
+
 def get_value(series, names):
-    """Return the first usable value from a financial statement row."""
-    if series is None or series.empty:
+    """Find the first available numeric value in a statement row."""
+    if series is None or getattr(series, "empty", True):
         return np.nan
 
     for name in names:
         if name in series.index:
-            value = pd.to_numeric(series[name], errors="coerce")
-            if pd.notna(value):
+            value = pd.to_numeric(series.loc[name], errors="coerce")
+
+            if isinstance(value, pd.Series):
+                value = value.dropna()
+                if not value.empty:
+                    return float(value.iloc[0])
+            elif pd.notna(value):
                 return float(value)
 
     return np.nan
 
 
-def get_statement_value(balance_sheet, names):
-    if balance_sheet is None or balance_sheet.empty:
+def get_statement_value(statement, names):
+    """Read the latest available annual statement column."""
+    if statement is None or statement.empty:
         return np.nan
 
-    # Use the most recent available balance sheet column
-    latest = balance_sheet.iloc[:, 0]
+    latest = statement.iloc[:, 0]
     return get_value(latest, names)
 
 
-def collect_company(ticker, company, sector, index_name):
+def safe_number(value):
+    """Convert values to finite numbers or NaN."""
+    try:
+        value = float(value)
+        return value if np.isfinite(value) else np.nan
+    except (TypeError, ValueError):
+        return np.nan
+
+
+def collect_company(ticker, company="", sector="Unknown",
+                    index_name="US-listed"):
     result = {
         "Ticker": ticker,
-        "Company": company,
-        "Sector": sector,
+        "Company": company or ticker,
+        "Sector": sector or "Unknown",
         "Index": index_name,
         "Price": np.nan,
         "Market Cap": np.nan,
@@ -217,86 +242,101 @@ def collect_company(ticker, company, sector, index_name):
         "Operating Liabilities": np.nan,
         "Net Operating Assets": np.nan,
         "Scaled net operating assets": np.nan,
-        "Data Status": "Incomplete"
+        "Data Status": "Incomplete",
+        "Data Error": ""
     }
 
     try:
         stock = yf.Ticker(ticker)
 
-        # Yahoo Finance quote information
-        info = stock.info or {}
+        # 1. Market quote data
+        info = stock.get_info() or {}
 
-        price = info.get("currentPrice")
-        if price is None:
-            price = info.get("regularMarketPrice")
+        price = safe_number(
+            info.get("currentPrice")
+            or info.get("regularMarketPrice")
+        )
+        market_cap = safe_number(info.get("marketCap"))
+        pe = safe_number(info.get("trailingPE"))
 
-        market_cap = info.get("marketCap")
-        pe = info.get("trailingPE")
-
-        if pe is None:
-            eps = info.get("trailingEps")
-            if price is not None and eps not in (None, 0):
+        if not pd.notna(pe):
+            eps = safe_number(info.get("trailingEps"))
+            if pd.notna(price) and pd.notna(eps) and eps != 0:
                 pe = price / eps
 
-        if pe is not None and not np.isfinite(float(pe)):
-            pe = np.nan
+        if not company:
+            result["Company"] = (
+                info.get("longName")
+                or info.get("shortName")
+                or ticker
+            )
 
-        # Balance sheet
+        if sector in ("", None, "Unknown"):
+            result["Sector"] = info.get("sector") or sector
+
+        # 2. Balance sheet data
         try:
             balance_sheet = stock.balance_sheet
         except Exception:
             balance_sheet = pd.DataFrame()
 
         total_assets = get_statement_value(
-            balance_sheet,
-            ["Total Assets"]
+            balance_sheet, ["Total Assets"]
         )
-
         total_liabilities = get_statement_value(
             balance_sheet,
-            ["Total Liabilities Net Minority Interest",
-             "Total Liabilities"]
+            [
+                "Total Liabilities Net Minority Interest",
+                "Total Liabilities"
+            ]
         )
-
         cash = get_statement_value(
             balance_sheet,
-            ["Cash Cash Equivalents And Short Term Investments",
-             "Cash And Cash Equivalents",
-             "Cash"]
+            [
+                "Cash Cash Equivalents And Short Term Investments",
+                "Cash And Cash Equivalents",
+                "Cash"
+            ]
         )
-
         short_term_investments = get_statement_value(
             balance_sheet,
-            ["Other Short Term Investments",
-             "Short Term Investments"]
+            [
+                "Other Short Term Investments",
+                "Short Term Investments"
+            ]
         )
-
         total_debt = get_statement_value(
             balance_sheet,
-            ["Total Debt"]
+            [
+                "Total Debt",
+                "Long Term Debt And Capital Lease Obligation"
+            ]
         )
-
         book_equity = get_statement_value(
             balance_sheet,
-            ["Stockholders Equity",
-             "Common Stock Equity",
-             "Total Stockholder Equity"]
+            [
+                "Stockholders Equity",
+                "Common Stock Equity",
+                "Total Stockholder Equity"
+            ]
         )
 
-        # If total debt is unavailable, do not assume it is zero.
-        # SNOA remains missing unless the required components exist.
+        # 3. Operating assets and liabilities
+        # Do not silently treat missing components as zero.
         operating_assets = np.nan
         operating_liabilities = np.nan
         noa = np.nan
         scaled_noa = np.nan
 
-        if (
-            pd.notna(total_assets)
-            and pd.notna(cash)
-            and pd.notna(short_term_investments)
-        ):
+        if pd.notna(total_assets) and pd.notna(cash):
+            # If short-term investments are unavailable, use cash only
+            # and flag that the operating-assets estimate is incomplete.
+            investments_for_calc = (
+                short_term_investments
+                if pd.notna(short_term_investments) else 0.0
+            )
             operating_assets = (
-                total_assets - cash - short_term_investments
+                total_assets - cash - investments_for_calc
             )
 
         if pd.notna(total_liabilities) and pd.notna(total_debt):
@@ -308,18 +348,17 @@ def collect_company(ticker, company, sector, index_name):
         ):
             noa = operating_assets - operating_liabilities
 
-        if pd.notna(noa) and pd.notna(total_assets) and total_assets != 0:
+        if pd.notna(noa) and pd.notna(total_assets) and total_assets > 0:
             scaled_noa = noa / total_assets
 
-        # Book-to-market ratio
+        # 4. Book-to-market = book equity / market capitalization
+        book_to_market = np.nan
         if (
             pd.notna(book_equity)
-            and market_cap not in (None, 0)
             and pd.notna(market_cap)
+            and market_cap > 0
         ):
             book_to_market = book_equity / market_cap
-        else:
-            book_to_market = np.nan
 
         result.update({
             "Price": price,
@@ -334,22 +373,43 @@ def collect_company(ticker, company, sector, index_name):
             "Scaled net operating assets": scaled_noa
         })
 
-        required = [
-            result["P/E"],
-            result["Book-to-market ratio"],
-            result["Scaled net operating assets"]
+        # Identify which key metrics are available.
+        key_metrics = [
+            price, market_cap, pe, book_equity,
+            book_to_market, total_assets, scaled_noa
         ]
+        available = sum(pd.notna(v) for v in key_metrics)
 
-        result["Data Status"] = (
-            "Complete" if all(pd.notna(v) for v in required)
-            else "Partial"
-        )
+        if available == len(key_metrics):
+            result["Data Status"] = "Complete"
+        elif available > 0:
+            result["Data Status"] = "Partial"
+        else:
+            result["Data Status"] = "No financial data"
+
+        if pd.isna(short_term_investments):
+            result["Data Error"] = (
+                "Short-term investments unavailable; "
+                "operating assets may be overstated."
+            )
 
     except Exception as e:
-        result["Data Status"] = f"Error: {str(e)[:100]}"
+        result["Data Status"] = "Fetch error"
+        result["Data Error"] = str(e)[:200]
 
     return result
 
+result = collect_company(
+    ticker,
+    company,
+    sector,
+    index_name
+)
+
+st.session_state.collected_data.append(result
+
+    if "collected_data" not in st.session_state:
+    st.session_state.collected_data = []
 
 # ---------------------------------------------------------
 # 3. CONTROLS
@@ -435,7 +495,42 @@ if st.sidebar.button("Collect next batch", type="primary"):
 if st.sidebar.button("Clear collected data"):
     st.session_state.collected_data = {}
     st.rerun()
+# 3. DISPLAY COLLECTED FINANCIAL DATA
+st.header("Collected Financial Data")
 
+if st.session_state.collected_data:
+    financial_df = pd.DataFrame(
+        st.session_state.collected_data
+    )
+
+    st.metric("Companies collected", len(financial_df))
+
+    st.dataframe(
+        financial_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    csv_data = financial_df.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        "Download Financial Data CSV",
+        data=csv_data,
+        file_name="financial_data.csv",
+        mime="text/csv"
+    )
+
+    if "Data Status" in financial_df.columns:
+        st.subheader("Data Collection Status")
+        st.dataframe(
+            financial_df["Data Status"].value_counts().rename_axis(
+                "Status"
+            ).reset_index(name="Companies"),
+            use_container_width=True,
+            hide_index=True
+        )
+else:
+    st.info("Collect a batch of companies to display financial data.")
 # ---------------------------------------------------------
 # 4. DISPLAY AND ANALYZE DATA
 # ---------------------------------------------------------
