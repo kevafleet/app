@@ -1,4 +1,4 @@
-TICKERS = [
+TICKER = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "ORCL", "CRM", "AMD",
     "CSCO", "IBM", "QCOM", "TXN", "INTU", "ADBE", "NOW", "AMAT", "MU", "LRCX",
     "KLAC", "ADI", "PANW", "SNPS", "CDNS", "ANET", "APH", "MSI", "FTNT", "NXPI",
@@ -63,5 +63,5 @@ TICKERS = [
 ]
 
 # Ensure unique elements while preserving order representation
-print(f"Created updated TICKERS with {len(TICKERS)} unique tickers.")
+print(f"Created updated TICKER with {len(TICKER)} unique tickers.")
 
