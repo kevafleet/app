@@ -31,16 +31,9 @@ st.caption(
 
 import pandas as pd
 
-unique_tickers = list(dict.fromkeys(FALLBACK_TICKERS))
-
-universe = pd.DataFrame({
-    "Ticker": unique_tickers
-})
-
 universe.to_csv("universe.csv", index=False)
 
 print(f"Saved {len(universe)} unique tickers.")
-unique_tickers = list(dict.fromkeys(FALLBACK_TICKERS))
 FALLBACK_TICKERS = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "ORCL", "CRM", "AMD",
     "CSCO", "IBM", "QCOM", "TXN", "INTU", "ADBE", "NOW", "AMAT", "MU", "LRCX",
@@ -104,7 +97,11 @@ FALLBACK_TICKERS = [
     "TNC", "BMI", "XLY", "XLK", "XLF", "XLV", "XLI", "XLE", "XLB", "XLU",
     "XLP", "IYZ", "VNQ", "ITA", "XHB", "XRT", "SMH", "IBB", "KRE", "KBE"
 ]
+unique_tickers = list(dict.fromkeys(FALLBACK_TICKERS))
 
+universe = pd.DataFrame({
+    "Ticker": unique_tickers
+})
 # 1. Load company universe
 try:
     df = pd.read_csv("universe.csv")
