@@ -406,7 +406,7 @@ result = collect_company(
     index_name
 )
 
-st.session_state.collected_data.append(result
+st.session_state.collected_data.append(result)
 
     if "collected_data" not in st.session_state:
     st.session_state.collected_data = []
