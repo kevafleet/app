@@ -399,11 +399,6 @@ def collect_company(ticker, company="", sector="Unknown",
 
     return result
 
-result = collect_company(
-    company,
-    sector,
-    index_name
-)
 
 st.session_state.collected_data.append(result)
 
