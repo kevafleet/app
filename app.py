@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -357,4 +358,3 @@ with st.expander("Metric definitions and interpretation"):
     - **Altman Z-score:** A financial-distress indicator whose formula and interpretation vary by company type. It may be unavailable or inappropriate for some firms.
     - **Revenue growth:** Year-over-year growth reported by the data provider.
     """)
-st.caption("Large-sample note: the app defaults to the largest available S&P 500 sample (up to 500 firms). The first live retrieval may take several minutes and can be affected by Yahoo Finance rate limits. Streamlit caching helps avoid repeat requests. Data may be delayed, incomplete, or subject to provider changes. For academic work, record the retrieval date, cite the data provider, and document missing-data treatment.")
