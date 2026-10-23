@@ -24,160 +24,154 @@ st.info(
 )
 
 
-# ---------------------------------------------------------
-# 1. BUILD THE UNIVERSE - GITHUB DATASET + LOCAL CSV FALLBACK
-# ---------------------------------------------------------
 
-from pathlib import Path
-
-UNIVERSE_PATH = Path(__file__).parent / "universe.csv"
+# 1. BUILD THE UNIVERSE
+import io
+import requests
+import pandas as pd
+import streamlit as st
 
 UNIVERSE_URL = (
     "https://raw.githubusercontent.com/"
     "zyhe16/top-us-stock-tickers/main/data/v2/tickers.csv"
 )
 
-FINANCIAL_SECTORS = {
-    "financials",
-    "financial services",
-    "financial",
-    "finance",
-}
-
-@st.cache_data(ttl=86400, show_spinner=False)
-def load_stock_universe():
-    errors = []
-    source = None
-
-    # Try the published dataset first.
+@st.cache_data(ttl=3600)
+def build_universe():
     try:
-        raw = pd.read_csv(
+        response = requests.get(
             UNIVERSE_URL,
-            keep_default_na=False,
             timeout=30,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        response.raise_for_status()
+
+        if not response.content.strip():
+            raise ValueError("The downloaded CSV file is empty.")
+
+        raw = pd.read_csv(
+            io.BytesIO(response.content),
+            keep_default_na=False
         )
 
-        required = {"symbol", "name", "sector", "country"}
-        if not required.issubset(
-            {str(c).lower() for c in raw.columns}
-        ):
-            raise ValueError("Remote dataset has unexpected columns.")
-
-        raw.columns = [str(c).strip().lower() for c in raw.columns]
-
-        if "is_us_domiciled" in raw.columns:
-            us_mask = (
-                raw["is_us_domiciled"]
-                .astype(str)
-                .str.lower()
-                .isin(["true", "1", "yes"])
+        if raw.empty or "symbol" not in raw.columns:
+            raise ValueError(
+                f"Unexpected CSV format. Columns found: "
+                f"{list(raw.columns)}"
             )
-            raw = raw.loc[us_mask].copy()
-        else:
-            raw = raw[
-                raw["country"].astype(str).str.strip()
-                == "United States"
+
+        # Convert the downloaded dataset into the app's format.
+        universe = pd.DataFrame()
+        universe["Ticker"] = raw["symbol"].astype(str).str.strip()
+        universe["Company"] = (
+            raw["name"].astype(str).str.strip()
+            if "name" in raw.columns else universe["Ticker"]
+        )
+        universe["Sector"] = (
+            raw["sector"].astype(str).str.strip()
+            if "sector" in raw.columns else "Unknown"
+        )
+
+        # Keep US-listed companies; exclude financial services.
+        if "country" in raw.columns:
+            country = raw["country"].astype(str).str.strip().str.lower()
+            universe = universe[
+                country.isin(["united states", "usa", "us"])
             ].copy()
 
-        universe = pd.DataFrame({
-            "Ticker": raw["symbol"].astype(str).str.strip().str.upper(),
-            "Company": raw["name"].astype(str).str.strip(),
-            "Sector": raw["sector"].astype(str).str.strip(),
-            "Index": "US-listed universe",
-        })
+        excluded_sectors = {
+            "finance",
+            "financial",
+            "financial services",
+            "financials",
+        }
+        universe = universe[
+            ~universe["Sector"].str.lower().isin(excluded_sectors)
+        ].copy()
 
-        source = "published US stock dataset"
-
-    except Exception as e:
-        errors.append(f"Remote source: {str(e)[:180]}")
-
-        # Fall back to a local CSV if network access fails.
-        if not UNIVERSE_PATH.exists():
-            raise RuntimeError(
-                "Could not load the remote stock dataset and "
-                "universe.csv was not found beside app.py. "
-                + " | ".join(errors)
-            )
-
-        local = pd.read_csv(
-            UNIVERSE_PATH,
-            keep_default_na=False,
+        # Remove blank and duplicate tickers.
+        universe["Ticker"] = (
+            universe["Ticker"].str.replace(".", "-", regex=False)
+            .str.replace("/", "-", regex=False)
         )
-        local.columns = [str(c).strip() for c in local.columns]
+        universe = universe[
+            universe["Ticker"].ne("")
+        ].drop_duplicates(subset="Ticker")
 
-        lower_map = {c.lower(): c for c in local.columns}
-
-        if "ticker" not in lower_map:
+        if universe.empty:
             raise ValueError(
-                "Local universe.csv must contain a Ticker column."
+                "No eligible companies remained after filtering."
             )
 
-        ticker_col = lower_map["ticker"]
-        company_col = lower_map.get("company")
-        sector_col = lower_map.get("sector")
+        universe["Index"] = "US-listed"
+        return universe.reset_index(drop=True)
 
-        universe = pd.DataFrame({
-            "Ticker": local[ticker_col].astype(str).str.strip().str.upper(),
-            "Company": (
-                local[company_col].astype(str).str.strip()
-                if company_col else local[ticker_col].astype(str).str.strip()
-            ),
-            "Sector": (
-                local[sector_col].astype(str).str.strip()
-                if sector_col else "Unknown"
-            ),
-            "Index": "Local CSV",
-        })
+    except Exception as exc:
+        # Fall back to a local CSV if one exists.
+        try:
+            local = pd.read_csv(
+                "universe.csv",
+                keep_default_na=False
+            )
 
-        source = "local universe.csv"
+            if "Ticker" not in local.columns:
+                raise ValueError(
+                    "universe.csv must contain a Ticker column."
+                )
 
-    # Normalize symbols for Yahoo Finance.
-    universe["Ticker"] = (
-        universe["Ticker"]
-        .str.replace("/", "-", regex=False)
-        .str.replace(".", "-", regex=False)
-    )
+            if "Company" not in local.columns:
+                local["Company"] = local["Ticker"]
 
-    universe = universe[
-        universe["Ticker"].str.fullmatch(r"[A-Z0-9-]+", na=False)
-    ].copy()
+            if "Sector" not in local.columns:
+                local["Sector"] = "Unknown"
 
-    universe = universe[
-        ~universe["Sector"].str.lower().isin(FINANCIAL_SECTORS)
-    ].copy()
+            local["Ticker"] = (
+                local["Ticker"].astype(str).str.strip()
+                .str.replace(".", "-", regex=False)
+                .str.replace("/", "-", regex=False)
+            )
 
-    universe = universe.drop_duplicates(
-        subset=["Ticker"]
-    ).reset_index(drop=True)
+            local = local[local["Ticker"].ne("")].copy()
+            local = local[
+                ~local["Sector"].astype(str).str.lower().isin(
+                    {
+                        "finance",
+                        "financial",
+                        "financial services",
+                        "financials",
+                    }
+                )
+            ]
 
-    if universe.empty:
-        raise RuntimeError("No eligible companies were found.")
+            if local.empty:
+                raise ValueError("The local universe.csv has no eligible rows.")
 
-    return universe, errors, source
+            if "Index" not in local.columns:
+                local["Index"] = "Local CSV"
+
+            st.warning(
+                f"Online download failed ({exc}). "
+                "Using the local universe.csv instead."
+            )
+            return local.drop_duplicates(
+                subset="Ticker"
+            ).reset_index(drop=True)
+
+        except Exception as local_exc:
+            raise RuntimeError(
+                f"Could not download the online universe: {exc}. "
+                f"Local CSV fallback also failed: {local_exc}"
+            ) from local_exc
 
 
-with st.spinner("Loading US stock universe..."):
-    try:
-        universe, source_errors, universe_source = load_stock_universe()
-    except Exception as e:
-        st.error(f"Could not build the stock universe: {e}")
-        st.stop()
+try:
+    universe = build_universe()
+    st.success(f"Loaded {len(universe):,} eligible companies.")
+    st.dataframe(universe.head(10), use_container_width=True)
 
-st.success(
-    f"Loaded {len(universe):,} unique eligible tickers "
-    f"from {universe_source}."
-)
-
-if source_errors:
-    with st.expander("Stock-universe source warnings"):
-        for message in source_errors:
-            st.write(f"- {message}")
-
-if len(universe) < 500:
-    st.warning(
-        "Fewer than 500 eligible tickers were loaded. "
-        "Check data-source availability and the universe file."
-    )
+except Exception as exc:
+    st.error(f"Could not build the stock universe: {exc}")
+    st.stop()
 
 
 # ---------------------------------------------------------
