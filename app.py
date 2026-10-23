@@ -712,7 +712,7 @@ if "collected_data" in st.session_state and st.session_state.collected_data:
                         "Ticker", "Company", "Data Status",
                         "P/E", "Book-to-Market", "SNOA"
                     ] if c in df.columns],
-                use_container_width=True]
+                use_container_width==True]
             )
 
 else:
