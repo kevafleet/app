@@ -1,3 +1,6 @@
+df_universe = pd.read_csv('universe.csv')
+print(f"Dataframe Shape: {df_universe.shape}")
+display(df_universe)
 FALLBACK_TICKERS = [
     # --- Technology & Communications (Software, Semi, Hardware) ---
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "ORCL", "CRM", "AMD",
