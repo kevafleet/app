@@ -18,9 +18,6 @@ st.caption(
 )
 
 st.info(
-    "Financial data is retrieved from Yahoo Finance and may be delayed, "
-    "incomplete, or unavailable. This is an academic screening tool, "
-    "not investment advice."
 )
 
 
