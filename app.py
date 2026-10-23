@@ -108,7 +108,7 @@ FALLBACK_TICKERS = [
 # Ensure unique elements while preserving order representation
 FALLBACK_TICKERS = list(dict.fromkeys(EXPANDED_TICKERS))
 print(f"Created updated FALLBACK_TICKERS with {len(FALLBACK_TICKERS)} unique tickers.")
-]
+
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_universe():
