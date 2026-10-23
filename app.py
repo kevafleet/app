@@ -1,8 +1,10 @@
 
-import streamlit as st
-import pandas as pd
+import time
 import numpy as np
+import pandas as pd
+import streamlit as st
 import plotly.express as px
+import yfinance as yf
 
 st.set_page_config(
     page_title="StockScreen Analytics",
@@ -10,469 +12,601 @@ st.set_page_config(
     layout="wide"
 )
 
-st.markdown("""
-<style>
-.block-container {padding-top: 1.5rem; max-width: 1450px;}
-[data-testid="stMetric"] {
-    background: #f4f7fb;
-    border: 1px solid #dbe4f0;
-    padding: 14px;
-    border-radius: 12px;
-}
-h1, h2, h3 {letter-spacing: -0.02em;}
-</style>
-""", unsafe_allow_html=True)
-
 st.title("📊 StockScreen Analytics")
 st.caption(
-    "Financial screening • P/E, Book-to-Market, "
-    "Scaled Net Operating Assets (NOA)"
+    "US equities | P/E | Book-to-Market | Scaled Net Operating Assets"
 )
 
-# Load company universe
-try:
-    df = pd.read_csv("universe.csv")
-except FileNotFoundError:
-    st.error(
-        "universe.csv was not found. Add it to the same GitHub "
-        "repository folder as app.py."
-    )
-    st.stop()
-except Exception as e:
-    st.error(f"Could not load universe.csv: {e}")
-    st.stop()
+st.info(
+    "Financial data is retrieved from Yahoo Finance and may be delayed, "
+    "incomplete, or unavailable. This is an academic screening tool, "
+    "not investment advice."
+)
 
-# Clean column names
-df.columns = df.columns.astype(str).str.strip()
+# ---------------------------------------------------------
+# 1. BUILD THE UNIVERSE - NO universe.csv REQUIRED
+# ---------------------------------------------------------
 
-if "Ticker" not in df.columns:
-    st.error(
-        f"universe.csv must have a Ticker column. "
-        f"Columns found: {df.columns.tolist()}"
-    )
-    st.stop()
+INDEX_SOURCES = {
+    "S&P 500": "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+    "S&P MidCap 400": "https://en.wikipedia.org/wiki/List_of_S%26P_400_companies",
+    "Nasdaq-100": "https://en.wikipedia.org/wiki/Nasdaq-100"
+}
 
-if "Sector" not in df.columns:
-    df["Sector"] = "Unknown"
+FINANCIAL_SECTORS = {
+    "financials",
+    "financial services",
+    "financial",
+    "finance"
+}
 
-df["Ticker"] = df["Ticker"].astype(str).str.strip().str.upper()
-df = df.drop_duplicates(subset=["Ticker"])
 
-universe.to_csv("universe.csv", index=False)
+@st.cache_data(ttl=86400, show_spinner=False)
+def load_index_universe():
+    frames = []
+    errors = []
 
-print(f"Saved {len(universe)} unique tickers.")
-FALLBACK_TICKERS = [
-    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "ORCL", "CRM", "AMD",
-    "CSCO", "IBM", "QCOM", "TXN", "INTU", "ADBE", "NOW", "AMAT", "MU", "LRCX",
-    "KLAC", "ADI", "PANW", "SNPS", "CDNS", "ANET", "APH", "MSI", "FTNT", "NXPI",
-    "MCHP", "ON", "MPWR", "DELL", "HPQ", "HPE", "STX", "WDC", "NTAP", "LOGI",
-    "SMCI", "DDOG", "NET", "PLTR", "OKTA", "ZS", "CRWD", "TEAM", "WDAY", "SNOW",
-    "SPLK", "GEN", "NLOK", "FFIV", "FSLR", "ENPH", "SEDG", "SWKS", "QRVO", "TER",
-    "ENTG", "COHR", "LITE", "IPG", "AKAM", "JNPR", "CIEN", "ANSS", "PTC", "ALTR",
-    "VRSN", "GRMN", "LOGM", "DBX", "BOX", "JNPR", "UI", "U", "UNITY", "PATH",
-    "JPM", "BAC", "WFC", "GS", "MS", "C", "BLK", "SCHW", "AXP", "USB",
-    "PNC", "TFC", "COF", "BK", "ICE", "CME", "SPGI", "MCO", "AON", "MMC",
-    "AJG", "WTW", "BRO", "CB", "PGR", "TRV", "ALL", "HIG", "MET", "PRU",
-    "AFL", "LNC", "PFG", "BEN", "TROW", "AMP", "IVZ", "STT", "NTRS", "FITB",
-    "HBAN", "KEY", "RF", "CFG", "MTB", "SBNY", "SIVB", "FRC", "CMA", "ZION",
-    "FCNCA", "NYCB", "EWBC", "WAL", "PACW", "BOKF", "ASB", "CFR", "UMBF", "FNB",
-    "SYF", "DFS", "SOFI", "HOOD", "COIN", "MKTX", "SEIC", "LPLA", "RJF", "SF",
-    "LLY", "JNJ", "ABBV", "MRK", "PFE", "AMGN", "GILD", "ISRG", "ABT", "TMO",
-    "DHR", "MDT", "SYK", "VRTX", "REGN", "CI", "ELV", "HUM", "CNC", "UNH",
-    "CVS", "COR", "MCK", "CAH", "BSX", "EW", "ZBH", "DXCM", "PODD", "ALGN",
-    "STE", "TFX", "BAX", "BDX", "A", "PKI", "MTD", "WAT", "WST", "IQV",
-    "CRL", "MEDP", "VEEV", "RMD", "RES", "MOH", "UHS", "HCA", "THC", "DGX",
-    "LH", "OPCH", "AMN", "MRNA", "BNTX", "SGEN", "BIIB", "ALNY", "BGNE", "INC_TEST",
-    "TECH", "INC_DEMO", "SRPT", "EXAS", "NBIX", "UTHR", "HALO", "PACB", "ILMN", "ONT",
-    "XOM", "CVX", "COP", "SLB", "EOG", "OXY", "PSX", "MPC", "VLO", "FANG",
-    "HAL", "BKR", "DVN", "PXD", "MRO", "APA", "HES", "TRGP", "OKE", "WMB",
-    "KMI", "LNG", "CTRA", "EQT", "RRC", "SWN", "CNX", "MTDR", "PDCE", "CHRD",
-    "MUR", "OVV", "CIVI", "VNOM", "DTM", "CDEV", "AR", "GPOR", "NFE", "AMPY",
-    "WMT", "COST", "HD", "LOW", "TGT", "TJX", "NKE", "MCD", "SBUX", "CMG",
-    "KO", "PEP", "PG", "CL", "MDLZ", "DG", "DLTR", "WBA", "KR", "SYY",
-    "YUM", "DPZ", "WEN", "QSR", "DRI", "TXRH", "EAT", "BLMN", "CAKE", "BJ",
-    "SFM", "GO", "FIVE", "ULTA", "ORLY", "AZO", "AAP", "GPC", "LKQ", "TSLA",
-    "F", "GM", "HMC", "TM", "LCID", "RIVN", "Fisker", "NIO", "LI", "XPEV",
-    "PHM", "LEN", "DHI", "TOL", "KBH", "MDC", "MTH", "GRBK", "TMHC", "CCS",
-    "CAT", "DE", "GE", "HON", "ETN", "UNP", "UPS", "FDX", "BA", "LMT",
-    "RTX", "GD", "NOC", "TDG", "HWM", "HEI", "TXT", "BWXT", "LHX", "LDOS",
-    "EMR", "ROK", "AME", "KEYS", "FTV", "IR", "DOV", "PH", "XYL", "FELE",
-    "GWW", "FAST", "MSM", "URI", "HEES", "HRI", "OC", "CX", "VMC", "MLI",
-    "NSC", "CSX", "UNP", "KSU", "CP", "CNI", "ODFL", "SAIA", "XPO", "ARCB",
-    "CHRW", "EXPD", "JBHT", "LSTR", "KNX", "TFII", "UHAL", "MATX", "AL", "AER",
-    "LIN", "APD", "SHW", "ECL", "FCX", "NEM", "CTVA", "DOW", "DD", "PPG",
-    "ALB", "FMC", "NUE", "STLD", "X", "CLF", "FCX", "AEM", "GOLD", "WPM",
-    "CF", "MOS", "IPI", "UAN", "EMN", "CE", "HUN", "OLN", "AVNT", "KWR",
-    "VALE", "RIO", "BHP", "AA", "CENX", "KGC", "AU", "HMY", "DRD", "SBGL",
-    "PG", "KO", "PEP", "PM", "MO", "EL", "KMB", "CHD", "CLX", "COTY",
-    "STZ", "BF-B", "TAP", "SAM", "BUD", "DEO", "HEINY", "CAG", "K", "GIS",
-    "HNZ", "CPB", "HRL", "SJM", "POST", "LW", "MKC", "HSY", "TR", "HAIN",
-    "NEE", "SO", "DUK", "D", "AEP", "EXC", "SRE", "XEL", "WEC", "AWK",
-    "PLD", "AMT", "CCI", "EQIX", "WY", "PSA", "O", "VICI", "WELL", "AVB",
-    "EQR", "MAA", "UDR", "ESS", "CPT", "SUI", "ELS", "RER", "FRT", "REG",
-    "KIM", "SPG", "MAC", "PECO", "EXR", "LSI", "CUBE", "COLD", "DRE", "STAG",
-    "DIS", "NFLX", "CMCSA", "T", "VZ", "TMUS", "CHTR", "FOXA", "EA", "TTWO",
-    "LYV", "WBD", "PARA", "NWSA", "NYT", "TGNA", "NXST", "SIRI", "SPOT", "WMG",
-    "LBRDK", "FWONA", "BATRA", "ZFOX", "ROKU", "IQ", "HUYA", "BILIBILI", "WB", "SINA",
-    "COPT", "HIW", "KRC", "OFC", "PGRE", "BDN", "CXP", "CLI", "HPP", "JBGS",
-    "AMH", "SFR", "INVH", "TCO", "WPG", "PEI", "CBL", "SRG", "UNIT", "SBRA",
-    "LTC", "NHI", "CHCT", "CTRE", "GMRE", "MTA", "GLPI", "MGP", "EPRT", "NETST",
-    "FIX", "MYRG", "PWR", "TTEK", "ACM", "AECOM", "KBR", "FLR", "J", "EMR",
-    "ROK", "FTV", "AME", "KEYS", "DOV", "PH", "XYL", "FELE", "GWW", "FAST",
-    "MSM", "URI", "HEES", "HRI", "OC", "CX", "VMC", "MLI", "EXP", "SUM",
-    "USCR", "CRH", "JELD", "PGT", "MAS", "FBHS", "AOS", "PNR", "MWA", "WTS",
-    "TNC", "BMI", "XLY", "XLK", "XLF", "XLV", "XLI", "XLE", "XLB", "XLU",
-    "XLP", "IYZ", "VNQ", "ITA", "XHB", "XRT", "SMH", "IBB", "KRE", "KBE"
-]
+    for index_name, url in INDEX_SOURCES.items():
+        try:
+            tables = pd.read_html(url)
+            found = False
 
-# 1. Load company universe
+            for table in tables:
+                table.columns = [
+                    str(c).strip() for c in table.columns
+                ]
 
-try:
-    df = pd.read_csv("universe.csv")
-    df.columns = df.columns.astype(str).str.strip()
+                lower_map = {
+                    str(c).strip().lower(): c
+                    for c in table.columns
+                }
 
-    # Detect when Python code was mistakenly saved as CSV
-    if "Ticker" not in df.columns:
-        st.warning(
-            "universe.csv is not a valid company CSV. "
-            "Using the fallback ticker list instead."
+                symbol_col = next(
+                    (
+                        lower_map[k]
+                        for k in ["symbol", "ticker"]
+                        if k in lower_map
+                    ),
+                    None
+                )
+
+                if symbol_col is None:
+                    continue
+
+                sector_col = next(
+                    (
+                        lower_map[k]
+                        for k in [
+                            "gics sector",
+                            "sector",
+                            "icb industry",
+                            "industry"
+                        ]
+                        if k in lower_map
+                    ),
+                    None
+                )
+
+                name_col = next(
+                    (
+                        lower_map[k]
+                        for k in [
+                            "security",
+                            "company",
+                            "company name",
+                            "name"
+                        ]
+                        if k in lower_map
+                    ),
+                    None
+                )
+
+                part = pd.DataFrame()
+                part["Ticker"] = table[symbol_col].astype(str)
+
+                part["Company"] = (
+                    table[name_col].astype(str)
+                    if name_col is not None
+                    else part["Ticker"]
+                )
+
+                part["Sector"] = (
+                    table[sector_col].astype(str)
+                    if sector_col is not None
+                    else "Unknown"
+                )
+
+                part["Index"] = index_name
+
+                part["Ticker"] = (
+                    part["Ticker"]
+                    .str.strip()
+                    .str.replace(".", "-", regex=False)
+                    .str.upper()
+                )
+
+                part = part[
+                    part["Ticker"].str.fullmatch(
+                        r"[A-Z0-9-]+", na=False
+                    )
+                ]
+
+                frames.append(part)
+                found = True
+                break
+
+            if not found:
+                errors.append(
+                    f"{index_name}: no recognizable ticker table found"
+                )
+
+        except Exception as e:
+            errors.append(f"{index_name}: {str(e)[:180]}")
+
+    if not frames:
+        raise RuntimeError(
+            "Unable to load any index constituents. "
+            "Check whether the data source is reachable. "
+            + " | ".join(errors)
         )
 
-        if "FALLBACK_TICKERS" not in globals():
-            st.error(
-                "FALLBACK_TICKERS is not defined in app.py. "
-                "Define the ticker list before this loading section."
-            )
-            st.stop()
+    universe = pd.concat(frames, ignore_index=True)
 
-        df = pd.DataFrame({"Ticker": FALLBACK_TICKERS})
+    # Prefer a row with an actual sector classification when duplicates exist
+    universe["_HasSector"] = (
+        universe["Sector"].str.lower().ne("unknown")
+    )
 
-except FileNotFoundError:
-    if "FALLBACK_TICKERS" not in globals():
-        st.error("universe.csv is missing and no fallback ticker list exists.")
+    universe = (
+        universe.sort_values("_HasSector", ascending=False)
+        .drop_duplicates(subset=["Ticker"])
+        .drop(columns="_HasSector")
+        .reset_index(drop=True)
+    )
+
+    # Exclude financial services based on available sector labels
+    is_financial = universe["Sector"].str.strip().str.lower().isin(
+        FINANCIAL_SECTORS
+    )
+
+    universe = universe.loc[~is_financial].reset_index(drop=True)
+
+    return universe, errors
+
+
+with st.spinner("Loading index constituents..."):
+    try:
+        universe, source_errors = load_index_universe()
+    except Exception as e:
+        st.error(f"Could not build the stock universe: {e}")
         st.stop()
 
-    df = pd.DataFrame({"Ticker": FALLBACK_TICKERS})
+if source_errors:
+    with st.expander("Index source warnings"):
+        for message in source_errors:
+            st.write(f"- {message}")
 
-except Exception as e:
-    st.error(f"Could not load company data: {e}")
-    st.stop()
-
-# Ensure required columns exist
-if "Company" not in df.columns:
-    df["Company"] = df["Ticker"]
-
-if "Sector" not in df.columns:
-    df["Sector"] = "Unknown"
-
-df["Ticker"] = df["Ticker"].astype(str).str.strip().str.upper()
-df = df.drop_duplicates(subset=["Ticker"]).reset_index(drop=True)
-
-
-# Normalize headers before accessing any columns
-df.columns = df.columns.astype(str).str.strip()
-
-# Standardize common column name variations
-rename_map = {}
-for col in df.columns:
-    normalized = col.strip().lower()
-
-    if normalized in ("ticker", "symbol"):
-        rename_map[col] = "Ticker"
-    elif normalized in ("company", "company name", "name"):
-        rename_map[col] = "Company"
-    elif normalized in ("sector", "gics sector", "industry sector"):
-        rename_map[col] = "Sector"
-    elif normalized in ("p/e", "pe", "pe ratio", "p/e ratio"):
-        rename_map[col] = "P/E"
-    elif normalized in (
-        "book-to-market ratio", "book to market ratio",
-        "book/market", "b/m"
-    ):
-        rename_map[col] = "Book-to-market ratio"
-    elif normalized in (
-        "scaled net operating assets",
-        "scaled noa", "noa"
-    ):
-        rename_map[col] = "Scaled net operating assets"
-    elif normalized in ("price", "share price"):
-        rename_map[col] = "Price"
-
-df = df.rename(columns=rename_map)
-
-# Required company identifier
-if "Ticker" not in df.columns:
-    st.error(
-        "universe.csv must contain a Ticker column. "
-        f"Columns found: {df.columns.tolist()}"
-    )
-    st.stop()
-
-# Add optional columns if the CSV does not contain them
-if "Company" not in df.columns:
-    df["Company"] = df["Ticker"]
-
-if "Sector" not in df.columns:
-    df["Sector"] = "Unknown"
-
-for col in [
-    "Price",
-    "P/E",
-    "Book-to-market ratio",
-    "Scaled net operating assets"
-]:
-    if col not in df.columns:
-        df[col] = np.nan
-    else:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-df["Ticker"] = df["Ticker"].astype(str).str.strip().str.upper()
-df["Company"] = df["Company"].fillna(df["Ticker"]).astype(str)
-df["Sector"] = (
-    df["Sector"].fillna("Unknown").astype(str).str.strip()
+st.success(
+    f"Loaded {len(universe):,} unique non-financial tickers "
+    "from the available index sources."
 )
-df = df[df["Ticker"].ne("") & df["Ticker"].ne("NAN")]
-df = df.drop_duplicates(subset=["Ticker"]).reset_index(drop=True)
 
-if df.empty:
-    st.error("No valid company tickers were found in universe.csv.")
-    st.stop()
-
-if len(df) < 500:
+if len(universe) < 500:
     st.warning(
-        f"Your dataset contains {len(df)} unique tickers. "
-        "The assignment target is at least 500 companies."
+        "Fewer than 500 eligible tickers were loaded. "
+        "An index source may have failed or classifications may be missing. "
+        "Check Index source warnings before using the results."
     )
 
-# 2. Sidebar scoring controls
-with st.sidebar:
-    st.header("Screening Controls")
-    st.subheader("Ranking Weights")
+# ---------------------------------------------------------
+# 2. FINANCIAL DATA COLLECTION
+# ---------------------------------------------------------
 
-    w_pe = st.slider("P/E Ratio Weight", 0, 100, 35)
-    w_bm = st.slider("Book-to-Market Weight", 0, 100, 35)
-    w_noa = st.slider("Scaled NOA Weight", 0, 100, 30)
+def get_value(series, names):
+    """Return the first usable value from a financial statement row."""
+    if series is None or series.empty:
+        return np.nan
 
-    st.caption("Weights are normalized automatically.")
+    for name in names:
+        if name in series.index:
+            value = pd.to_numeric(series[name], errors="coerce")
+            if pd.notna(value):
+                return float(value)
 
-# 3. Screen controls
-st.subheader("1. Define your screen")
+    return np.nan
 
-available_sectors = sorted(df["Sector"].unique().tolist())
 
-c1, c2, c3 = st.columns(3)
+def get_statement_value(balance_sheet, names):
+    if balance_sheet is None or balance_sheet.empty:
+        return np.nan
 
-with c1:
-    sectors = st.multiselect(
-        "Sectors to include",
-        options=available_sectors,
-        default=available_sectors
-    )
+    # Use the most recent available balance sheet column
+    latest = balance_sheet.iloc[:, 0]
+    return get_value(latest, names)
 
-with c2:
-    max_pe = st.number_input(
-        "Maximum P/E (0 = ignore)",
-        min_value=0.0,
-        value=60.0,
-        step=5.0
-    )
 
-with c3:
-    min_bm = st.number_input(
-        "Minimum Book-to-Market (0 = ignore)",
-        min_value=0.0,
-        value=0.1,
-        step=0.1
-    )
+def collect_company(ticker, company, sector, index_name):
+    result = {
+        "Ticker": ticker,
+        "Company": company,
+        "Sector": sector,
+        "Index": index_name,
+        "Price": np.nan,
+        "Market Cap": np.nan,
+        "P/E": np.nan,
+        "Book Equity": np.nan,
+        "Book-to-market ratio": np.nan,
+        "Total Assets": np.nan,
+        "Operating Assets": np.nan,
+        "Operating Liabilities": np.nan,
+        "Net Operating Assets": np.nan,
+        "Scaled net operating assets": np.nan,
+        "Data Status": "Incomplete"
+    }
 
-# 4. Apply filters
-filtered = df[df["Sector"].isin(sectors)].copy()
+    try:
+        stock = yf.Ticker(ticker)
 
-if max_pe > 0:
-    filtered = filtered[
-        filtered["P/E"].isna() | (filtered["P/E"] <= max_pe)
-    ]
+        # Yahoo Finance quote information
+        info = stock.info or {}
 
-if min_bm > 0:
-    filtered = filtered[
-        filtered["Book-to-market ratio"].isna()
-        | (filtered["Book-to-market ratio"] >= min_bm)
-    ]
+        price = info.get("currentPrice")
+        if price is None:
+            price = info.get("regularMarketPrice")
 
-# 5. Calculate within-sector percentile scores
-def percentile_score(series, higher_is_better=True):
-    valid = series.notna()
-    result = pd.Series(np.nan, index=series.index, dtype=float)
+        market_cap = info.get("marketCap")
+        pe = info.get("trailingPE")
 
-    if valid.any():
-        ranks = series[valid].rank(pct=True, method="average")
-        result.loc[valid] = (
-            ranks if higher_is_better else 1 - ranks
+        if pe is None:
+            eps = info.get("trailingEps")
+            if price is not None and eps not in (None, 0):
+                pe = price / eps
+
+        if pe is not None and not np.isfinite(float(pe)):
+            pe = np.nan
+
+        # Balance sheet
+        try:
+            balance_sheet = stock.balance_sheet
+        except Exception:
+            balance_sheet = pd.DataFrame()
+
+        total_assets = get_statement_value(
+            balance_sheet,
+            ["Total Assets"]
         )
+
+        total_liabilities = get_statement_value(
+            balance_sheet,
+            ["Total Liabilities Net Minority Interest",
+             "Total Liabilities"]
+        )
+
+        cash = get_statement_value(
+            balance_sheet,
+            ["Cash Cash Equivalents And Short Term Investments",
+             "Cash And Cash Equivalents",
+             "Cash"]
+        )
+
+        short_term_investments = get_statement_value(
+            balance_sheet,
+            ["Other Short Term Investments",
+             "Short Term Investments"]
+        )
+
+        total_debt = get_statement_value(
+            balance_sheet,
+            ["Total Debt"]
+        )
+
+        book_equity = get_statement_value(
+            balance_sheet,
+            ["Stockholders Equity",
+             "Common Stock Equity",
+             "Total Stockholder Equity"]
+        )
+
+        # If total debt is unavailable, do not assume it is zero.
+        # SNOA remains missing unless the required components exist.
+        operating_assets = np.nan
+        operating_liabilities = np.nan
+        noa = np.nan
+        scaled_noa = np.nan
+
+        if (
+            pd.notna(total_assets)
+            and pd.notna(cash)
+            and pd.notna(short_term_investments)
+        ):
+            operating_assets = (
+                total_assets - cash - short_term_investments
+            )
+
+        if pd.notna(total_liabilities) and pd.notna(total_debt):
+            operating_liabilities = total_liabilities - total_debt
+
+        if (
+            pd.notna(operating_assets)
+            and pd.notna(operating_liabilities)
+        ):
+            noa = operating_assets - operating_liabilities
+
+        if pd.notna(noa) and pd.notna(total_assets) and total_assets != 0:
+            scaled_noa = noa / total_assets
+
+        # Book-to-market ratio
+        if (
+            pd.notna(book_equity)
+            and market_cap not in (None, 0)
+            and pd.notna(market_cap)
+        ):
+            book_to_market = book_equity / market_cap
+        else:
+            book_to_market = np.nan
+
+        result.update({
+            "Price": price,
+            "Market Cap": market_cap,
+            "P/E": pe,
+            "Book Equity": book_equity,
+            "Book-to-market ratio": book_to_market,
+            "Total Assets": total_assets,
+            "Operating Assets": operating_assets,
+            "Operating Liabilities": operating_liabilities,
+            "Net Operating Assets": noa,
+            "Scaled net operating assets": scaled_noa
+        })
+
+        required = [
+            result["P/E"],
+            result["Book-to-market ratio"],
+            result["Scaled net operating assets"]
+        ]
+
+        result["Data Status"] = (
+            "Complete" if all(pd.notna(v) for v in required)
+            else "Partial"
+        )
+
+    except Exception as e:
+        result["Data Status"] = f"Error: {str(e)[:100]}"
 
     return result
 
-metric_columns = [
-    "P/E",
-    "Book-to-market ratio",
-    "Scaled net operating assets"
-]
 
-if not filtered.empty:
-    # Calculate peer ranks within each sector
-    grouped = filtered.groupby("Sector", dropna=False)
+# ---------------------------------------------------------
+# 3. CONTROLS
+# ---------------------------------------------------------
 
-    filtered["P/E Score"] = grouped["P/E"].transform(
-        lambda s: percentile_score(s, higher_is_better=False)
-    )
-    filtered["B/M Score"] = grouped[
-        "Book-to-market ratio"
-    ].transform(
-        lambda s: percentile_score(s, higher_is_better=True)
-    )
-    filtered["NOA Score"] = grouped[
-        "Scaled net operating assets"
-    ].transform(
-        lambda s: percentile_score(s, higher_is_better=False)
-    )
+st.sidebar.header("Data Collection")
 
-    # Only use metrics with available data for each company.
-    # Renormalize weights when a metric is missing.
-    raw_weights = {
-        "P/E Score": w_pe,
-        "B/M Score": w_bm,
-        "NOA Score": w_noa
-    }
-
-    score_cols = list(raw_weights)
-    score_matrix = filtered[score_cols]
-    weight_series = pd.Series(raw_weights, dtype=float)
-
-    weighted_scores = score_matrix.mul(weight_series, axis=1)
-    available_weights = (
-        score_matrix.notna().mul(weight_series, axis=1).sum(axis=1)
-    )
-
-    filtered["Composite Score"] = (
-        weighted_scores.sum(axis=1, min_count=1)
-        .div(available_weights.replace(0, np.nan))
-        * 100
-    )
-
-    filtered = filtered.sort_values(
-        "Composite Score", ascending=False, na_position="last"
-    ).reset_index(drop=True)
-
-    filtered.insert(0, "Rank", range(1, len(filtered) + 1))
-
-# 6. Results
-st.subheader("2. Results")
-
-m1, m2, m3 = st.columns(3)
-m1.metric("Total Universe Size", f"{len(df):,}")
-m2.metric("Passing Screen", f"{len(filtered):,}")
-
-median_score = (
-    filtered["Composite Score"].median()
-    if not filtered.empty else np.nan
-)
-m3.metric(
-    "Median Composite Score",
-    f"{median_score:.1f}" if pd.notna(median_score) else "—"
+st.sidebar.caption(
+    "The first data pull can take time. Collect smaller batches "
+    "if Yahoo Finance limits requests."
 )
 
-if filtered.empty:
-    st.warning("No companies passed the current filters.")
+batch_size = st.sidebar.selectbox(
+    "Companies to collect per run",
+    options=[25, 50, 100, 250, 500],
+    index=2
+)
+
+max_companies = min(batch_size, len(universe))
+
+sector_options = sorted(universe["Sector"].unique().tolist())
+
+selected_sectors = st.sidebar.multiselect(
+    "Sectors",
+    sector_options,
+    default=sector_options
+)
+
+if "collected_data" not in st.session_state:
+    st.session_state.collected_data = {}
+
+filtered_universe = universe[
+    universe["Sector"].isin(selected_sectors)
+].reset_index(drop=True)
+
+already_collected = set(st.session_state.collected_data.keys())
+
+remaining = filtered_universe[
+    ~filtered_universe["Ticker"].isin(already_collected)
+].reset_index(drop=True)
+
+st.sidebar.metric("Universe size", f"{len(universe):,}")
+st.sidebar.metric(
+    "Collected",
+    f"{len(already_collected):,}"
+)
+st.sidebar.metric(
+    "Remaining in selected sectors",
+    f"{len(remaining):,}"
+)
+
+if st.sidebar.button("Collect next batch", type="primary"):
+    if remaining.empty:
+        st.sidebar.info("No uncollected companies remain in this selection.")
+    else:
+        batch = remaining.head(max_companies)
+        progress = st.progress(0)
+        status = st.empty()
+
+        for i, row in batch.iterrows():
+            status.write(
+                f"Collecting {i + 1} of {len(batch)}: {row['Ticker']}"
+            )
+
+            data = collect_company(
+                row["Ticker"],
+                row["Company"],
+                row["Sector"],
+                row["Index"]
+            )
+
+            st.session_state.collected_data[row["Ticker"]] = data
+            progress.progress((i + 1) / len(batch))
+
+            # Small pause to reduce request pressure
+            time.sleep(0.15)
+
+        status.success(
+            f"Finished collecting {len(batch)} companies."
+        )
+        st.rerun()
+
+if st.sidebar.button("Clear collected data"):
+    st.session_state.collected_data = {}
+    st.rerun()
+
+# ---------------------------------------------------------
+# 4. DISPLAY AND ANALYZE DATA
+# ---------------------------------------------------------
+
+st.subheader("1. Company Universe")
+st.dataframe(
+    universe,
+    use_container_width=True,
+    hide_index=True
+)
+
+if not st.session_state.collected_data:
+    st.info(
+        "Select sectors in the sidebar, then click "
+        "'Collect next batch' to begin."
+    )
     st.stop()
 
-if filtered["Composite Score"].notna().sum() == 0:
-    st.warning(
-        "No composite scores could be calculated. "
-        "Check whether your CSV contains numeric financial metrics."
-    )
-
-display_cols = [
-    "Rank", "Ticker", "Company", "Sector", "Price", "P/E",
-    "Book-to-market ratio", "Scaled net operating assets",
-    "Composite Score"
-]
-
-st.dataframe(
-    filtered[display_cols],
-    use_container_width=True,
-    hide_index=True,
-    column_config={
-        "Composite Score": st.column_config.ProgressColumn(
-            "Composite Score",
-            min_value=0,
-            max_value=100,
-            format="%.1f"
-        )
-    }
+data = pd.DataFrame(
+    list(st.session_state.collected_data.values())
 )
 
-# 7. Charts
-chart_data = filtered.dropna(subset=["Composite Score"])
+# Ensure numeric metric columns are numeric
+metric_cols = [
+    "P/E",
+    "Book-to-market ratio",
+    "Scaled net operating assets",
+    "Price",
+    "Market Cap"
+]
 
-if not chart_data.empty:
-    left, right = st.columns(2)
+for col in metric_cols:
+    data[col] = pd.to_numeric(data[col], errors="coerce")
 
-    with left:
-        st.markdown("#### Top 15 Companies by Composite Score")
-        top = chart_data.head(15).sort_values("Composite Score")
+st.subheader("2. Financial Metrics")
 
-        fig = px.bar(
-            top,
-            x="Composite Score",
-            y="Ticker",
-            orientation="h",
-            color="Composite Score",
-            hover_data=["Company", "Sector", "P/E"],
-            title="Top 15 Ranking"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Companies collected", f"{len(data):,}")
+m2.metric("Complete metric sets", f"{(data['Data Status'] == 'Complete').sum():,}")
+m3.metric("Median P/E", f"{data['P/E'].median():.2f}" if data["P/E"].notna().any() else "—")
+m4.metric(
+    "Median Book-to-Market",
+    f"{data['Book-to-market ratio'].median():.3f}"
+    if data["Book-to-market ratio"].notna().any()
+    else "—"
+)
 
-    with right:
-        st.markdown("#### Book-to-Market vs. Scaled NOA")
+st.caption(
+    "SNOA calculation used here: "
+    "[(Total assets − cash − short-term investments) − "
+    "(total liabilities − total debt)] / total assets. "
+    "Confirm this operational definition against your course materials."
+)
 
-        scatter_data = filtered.dropna(
-            subset=[
-                "Book-to-market ratio",
-                "Scaled net operating assets"
-            ]
-        )
+st.dataframe(
+    data.sort_values("Ticker"),
+    use_container_width=True,
+    hide_index=True
+)
 
-        if not scatter_data.empty:
-            fig2 = px.scatter(
-                scatter_data,
-                x="Book-to-market ratio",
-                y="Scaled net operating assets",
-                color="Sector",
-                hover_name="Ticker",
-                hover_data=["Company", "Composite Score"],
-                title="B/M vs. Scaled NOA"
-            )
-            st.plotly_chart(fig2, use_container_width=True)
-        else:
-            st.info("Not enough data for the scatter plot.")
+# ---------------------------------------------------------
+# 5. WITHIN-SECTOR PERCENTILE RANKS
+# ---------------------------------------------------------
 
-# 8. Export
-csv_data = filtered.to_csv(index=False).encode("utf-8")
+st.subheader("3. Within-Sector Analysis")
+
+ranked = data.copy()
+
+# Higher book-to-market is ranked higher.
+# Lower positive P/E is ranked higher; negative P/E is not scored.
+ranked["P/E for ranking"] = ranked["P/E"].where(ranked["P/E"] > 0)
+
+ranked["P/E Peer Percentile"] = ranked.groupby("Sector")[
+    "P/E for ranking"
+].rank(pct=True, ascending=False) * 100
+
+ranked["B/M Peer Percentile"] = ranked.groupby("Sector")[
+    "Book-to-market ratio"
+].rank(pct=True, ascending=True) * 100
+
+# Lower SNOA receives a higher percentile in this exploratory screen.
+ranked["SNOA Peer Percentile"] = ranked.groupby("Sector")[
+    "Scaled net operating assets"
+].rank(pct=True, ascending=False) * 100
+
+st.dataframe(
+    ranked[
+        [
+            "Ticker", "Company", "Sector", "P/E",
+            "Book-to-market ratio",
+            "Scaled net operating assets",
+            "P/E Peer Percentile",
+            "B/M Peer Percentile",
+            "SNOA Peer Percentile",
+            "Data Status"
+        ]
+    ],
+    use_container_width=True,
+    hide_index=True
+)
+
+valid_scatter = ranked.dropna(
+    subset=["Book-to-market ratio", "Scaled net operating assets"]
+)
+
+if not valid_scatter.empty:
+    st.subheader("4. Visualization")
+
+    fig = px.scatter(
+        valid_scatter,
+        x="Book-to-market ratio",
+        y="Scaled net operating assets",
+        color="Sector",
+        hover_name="Ticker",
+        hover_data=["Company", "P/E"],
+        title="Book-to-Market vs. Scaled NOA"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+# ---------------------------------------------------------
+# 6. EXPORT
+# ---------------------------------------------------------
+
+st.subheader("5. Export")
+
 st.download_button(
-    "Download Screen Results (CSV)",
-    data=csv_data,
-    file_name="stockscreen_results.csv",
+    "Download collected financial data (CSV)",
+    data=data.to_csv(index=False).encode("utf-8"),
+    file_name="financial_metrics.csv",
     mime="text/csv"
 )
 
-with st.expander("Dataset diagnostics"):
-    st.write("Loaded columns:", df.columns.tolist())
-    st.write("Unique tickers:", df["Ticker"].nunique())
-    st.write("Sector counts:")
-    st.dataframe(
-        df["Sector"].value_counts().rename_axis("Sector").reset_index(
-            name="Companies"
-        ),
-        use_container_width=True,
-        hide_index=True
+st.download_button(
+    "Download peer rankings (CSV)",
+    data=ranked.to_csv(index=False).encode("utf-8"),
+    file_name="sector_peer_rankings.csv",
+    mime="text/csv"
+)
+
+with st.expander("Data quality notes"):
+    st.write(
+        "- Missing financial data is left blank, not replaced with zero.\n"
+        "- Book-to-market uses book equity divided by market capitalization.\n"
+        "- P/E may be unavailable for companies with negative or missing earnings.\n"
+        "- SNOA is sensitive to how operating assets and liabilities are defined.\n"
+        "- Sector labels are sourced from index constituent tables; "
+        "Unknown sectors should be reviewed before analysis.\n"
+        "- Yahoo Finance data fields and availability can change."
     )
