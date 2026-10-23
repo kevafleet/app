@@ -407,9 +407,8 @@ result = collect_company(
 )
 
 st.session_state.collected_data.append(result)
-
-    if "collected_data" not in st.session_state:
-    st.session_state.collected_data = []
+if "collected_data" not in st.session_state:
+st.session_state.collected_data = []
 
 # ---------------------------------------------------------
 # 3. CONTROLS
