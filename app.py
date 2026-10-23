@@ -17,8 +17,7 @@ st.caption(
     "US equities | P/E | Book-to-Market | Scaled Net Operating Assets"
 )
 
-st.info(
-)
+st.info
 
 
 
