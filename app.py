@@ -45,8 +45,7 @@ with c3:
     min_bm = st.number_input("Minimum Book-to-market ratio (0 = ignore)", min_value=0.0, value=0.1, step=0.1)
 
 filtered = df.copy()
-if sectors:
-    filtered = filtered[filtered["Sector"].fillna("Unknown").astype(str).isin(sectors)]
+
 if max_pe > 0 and "P/E" in filtered.columns:
     filtered = filtered[filtered["P/E"].isna() | (filtered["P/E"] <= max_pe)]
 if min_bm > 0 and "Book-to-market ratio" in filtered.columns:
