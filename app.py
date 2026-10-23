@@ -103,3 +103,19 @@ with right:
     fig2 = px.scatter(filtered, x="Book-to-market ratio", y="Scaled net operating assets", color="Sector",
                       hover_name="Ticker", hover_data=["Company", "Composite Score"], title="B/M vs Scaled NOA")
     st.plotly_chart(fig2, use_container_width=True)
+# Normalize column names to avoid issues with spaces or capitalization
+
+df.columns = df.columns.astype(str).str.strip()
+
+if "Sector" not in df.columns:
+    if "GICS Sector" in df.columns:
+        df = df.rename(columns={"GICS Sector": "Sector"})
+    elif "sector" in df.columns:
+        df = df.rename(columns={"sector": "Sector"})
+    else:
+        # If sector data is unavailable, assign an Unknown category
+        df["Sector"] = "Unknown"
+
+available_sectors = sorted(
+    df["Sector"].fillna("Unknown").astype(str).unique().tolist()
+)
