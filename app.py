@@ -400,7 +400,6 @@ def collect_company(ticker, company="", sector="Unknown",
     return result
 
 result = collect_company(
-    ticker,
     company,
     sector,
     index_name
