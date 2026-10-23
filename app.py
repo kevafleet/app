@@ -23,180 +23,162 @@ st.info(
     "not investment advice."
 )
 
+
 # ---------------------------------------------------------
-# 1. BUILD THE UNIVERSE - NO universe.csv REQUIRED
+# 1. BUILD THE UNIVERSE - GITHUB DATASET + LOCAL CSV FALLBACK
 # ---------------------------------------------------------
 
-INDEX_SOURCES = {
-    "S&P 500": "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
-    "S&P MidCap 400": "https://en.wikipedia.org/wiki/List_of_S%26P_400_companies",
-    "Nasdaq-100": "https://en.wikipedia.org/wiki/Nasdaq-100"
-}
+from pathlib import Path
+
+UNIVERSE_PATH = Path(__file__).parent / "universe.csv"
+
+UNIVERSE_URL = (
+    "https://raw.githubusercontent.com/"
+    "zyhe16/top-us-stock-tickers/main/data/v2/tickers.csv"
+)
 
 FINANCIAL_SECTORS = {
     "financials",
     "financial services",
     "financial",
-    "finance"
+    "finance",
 }
 
-
 @st.cache_data(ttl=86400, show_spinner=False)
-def load_index_universe():
-    frames = []
+def load_stock_universe():
     errors = []
+    source = None
 
-    for index_name, url in INDEX_SOURCES.items():
-        try:
-            tables = pd.read_html(url)
-            found = False
-
-            for table in tables:
-                table.columns = [
-                    str(c).strip() for c in table.columns
-                ]
-
-                lower_map = {
-                    str(c).strip().lower(): c
-                    for c in table.columns
-                }
-
-                symbol_col = next(
-                    (
-                        lower_map[k]
-                        for k in ["symbol", "ticker"]
-                        if k in lower_map
-                    ),
-                    None
-                )
-
-                if symbol_col is None:
-                    continue
-
-                sector_col = next(
-                    (
-                        lower_map[k]
-                        for k in [
-                            "gics sector",
-                            "sector",
-                            "icb industry",
-                            "industry"
-                        ]
-                        if k in lower_map
-                    ),
-                    None
-                )
-
-                name_col = next(
-                    (
-                        lower_map[k]
-                        for k in [
-                            "security",
-                            "company",
-                            "company name",
-                            "name"
-                        ]
-                        if k in lower_map
-                    ),
-                    None
-                )
-
-                part = pd.DataFrame()
-                part["Ticker"] = table[symbol_col].astype(str)
-
-                part["Company"] = (
-                    table[name_col].astype(str)
-                    if name_col is not None
-                    else part["Ticker"]
-                )
-
-                part["Sector"] = (
-                    table[sector_col].astype(str)
-                    if sector_col is not None
-                    else "Unknown"
-                )
-
-                part["Index"] = index_name
-
-                part["Ticker"] = (
-                    part["Ticker"]
-                    .str.strip()
-                    .str.replace(".", "-", regex=False)
-                    .str.upper()
-                )
-
-                part = part[
-                    part["Ticker"].str.fullmatch(
-                        r"[A-Z0-9-]+", na=False
-                    )
-                ]
-
-                frames.append(part)
-                found = True
-                break
-
-            if not found:
-                errors.append(
-                    f"{index_name}: no recognizable ticker table found"
-                )
-
-        except Exception as e:
-            errors.append(f"{index_name}: {str(e)[:180]}")
-
-    if not frames:
-        raise RuntimeError(
-            "Unable to load any index constituents. "
-            "Check whether the data source is reachable. "
-            + " | ".join(errors)
+    # Try the published dataset first.
+    try:
+        raw = pd.read_csv(
+            UNIVERSE_URL,
+            keep_default_na=False,
+            timeout=30,
         )
 
-    universe = pd.concat(frames, ignore_index=True)
+        required = {"symbol", "name", "sector", "country"}
+        if not required.issubset(
+            {str(c).lower() for c in raw.columns}
+        ):
+            raise ValueError("Remote dataset has unexpected columns.")
 
-    # Prefer a row with an actual sector classification when duplicates exist
-    universe["_HasSector"] = (
-        universe["Sector"].str.lower().ne("unknown")
+        raw.columns = [str(c).strip().lower() for c in raw.columns]
+
+        if "is_us_domiciled" in raw.columns:
+            us_mask = (
+                raw["is_us_domiciled"]
+                .astype(str)
+                .str.lower()
+                .isin(["true", "1", "yes"])
+            )
+            raw = raw.loc[us_mask].copy()
+        else:
+            raw = raw[
+                raw["country"].astype(str).str.strip()
+                == "United States"
+            ].copy()
+
+        universe = pd.DataFrame({
+            "Ticker": raw["symbol"].astype(str).str.strip().str.upper(),
+            "Company": raw["name"].astype(str).str.strip(),
+            "Sector": raw["sector"].astype(str).str.strip(),
+            "Index": "US-listed universe",
+        })
+
+        source = "published US stock dataset"
+
+    except Exception as e:
+        errors.append(f"Remote source: {str(e)[:180]}")
+
+        # Fall back to a local CSV if network access fails.
+        if not UNIVERSE_PATH.exists():
+            raise RuntimeError(
+                "Could not load the remote stock dataset and "
+                "universe.csv was not found beside app.py. "
+                + " | ".join(errors)
+            )
+
+        local = pd.read_csv(
+            UNIVERSE_PATH,
+            keep_default_na=False,
+        )
+        local.columns = [str(c).strip() for c in local.columns]
+
+        lower_map = {c.lower(): c for c in local.columns}
+
+        if "ticker" not in lower_map:
+            raise ValueError(
+                "Local universe.csv must contain a Ticker column."
+            )
+
+        ticker_col = lower_map["ticker"]
+        company_col = lower_map.get("company")
+        sector_col = lower_map.get("sector")
+
+        universe = pd.DataFrame({
+            "Ticker": local[ticker_col].astype(str).str.strip().str.upper(),
+            "Company": (
+                local[company_col].astype(str).str.strip()
+                if company_col else local[ticker_col].astype(str).str.strip()
+            ),
+            "Sector": (
+                local[sector_col].astype(str).str.strip()
+                if sector_col else "Unknown"
+            ),
+            "Index": "Local CSV",
+        })
+
+        source = "local universe.csv"
+
+    # Normalize symbols for Yahoo Finance.
+    universe["Ticker"] = (
+        universe["Ticker"]
+        .str.replace("/", "-", regex=False)
+        .str.replace(".", "-", regex=False)
     )
 
-    universe = (
-        universe.sort_values("_HasSector", ascending=False)
-        .drop_duplicates(subset=["Ticker"])
-        .drop(columns="_HasSector")
-        .reset_index(drop=True)
-    )
+    universe = universe[
+        universe["Ticker"].str.fullmatch(r"[A-Z0-9-]+", na=False)
+    ].copy()
 
-    # Exclude financial services based on available sector labels
-    is_financial = universe["Sector"].str.strip().str.lower().isin(
-        FINANCIAL_SECTORS
-    )
+    universe = universe[
+        ~universe["Sector"].str.lower().isin(FINANCIAL_SECTORS)
+    ].copy()
 
-    universe = universe.loc[~is_financial].reset_index(drop=True)
+    universe = universe.drop_duplicates(
+        subset=["Ticker"]
+    ).reset_index(drop=True)
 
-    return universe, errors
+    if universe.empty:
+        raise RuntimeError("No eligible companies were found.")
+
+    return universe, errors, source
 
 
-with st.spinner("Loading index constituents..."):
+with st.spinner("Loading US stock universe..."):
     try:
-        universe, source_errors = load_index_universe()
+        universe, source_errors, universe_source = load_stock_universe()
     except Exception as e:
         st.error(f"Could not build the stock universe: {e}")
         st.stop()
 
+st.success(
+    f"Loaded {len(universe):,} unique eligible tickers "
+    f"from {universe_source}."
+)
+
 if source_errors:
-    with st.expander("Index source warnings"):
+    with st.expander("Stock-universe source warnings"):
         for message in source_errors:
             st.write(f"- {message}")
-
-st.success(
-    f"Loaded {len(universe):,} unique non-financial tickers "
-    "from the available index sources."
-)
 
 if len(universe) < 500:
     st.warning(
         "Fewer than 500 eligible tickers were loaded. "
-        "An index source may have failed or classifications may be missing. "
-        "Check Index source warnings before using the results."
+        "Check data-source availability and the universe file."
     )
+
 
 # ---------------------------------------------------------
 # 2. FINANCIAL DATA COLLECTION
