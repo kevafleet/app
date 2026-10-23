@@ -29,6 +29,18 @@ st.caption(
     "Scaled Net Operating Assets (NOA)"
 )
 
+import pandas as pd
+
+unique_tickers = list(dict.fromkeys(FALLBACK_TICKERS))
+
+universe = pd.DataFrame({
+    "Ticker": unique_tickers
+})
+
+universe.to_csv("universe.csv", index=False)
+
+print(f"Saved {len(universe)} unique tickers.")
+
 TICKER = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "ORCL", "CRM", "AMD",
     "CSCO", "IBM", "QCOM", "TXN", "INTU", "ADBE", "NOW", "AMAT", "MU", "LRCX",
