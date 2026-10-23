@@ -1,4 +1,4 @@
-TICKER = [
+FALLBACK_TICKERS = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "ORCL", "CRM", "AMD",
     "CSCO", "IBM", "QCOM", "TXN", "INTU", "ADBE", "NOW", "AMAT", "MU", "LRCX",
     "KLAC", "ADI", "PANW", "SNPS", "CDNS", "ANET", "APH", "MSI", "FTNT", "NXPI",
@@ -63,5 +63,5 @@ TICKER = [
 ]
 
 # Ensure unique elements while preserving order representation
-print(f"Created updated TICKER with {len(TICKER)} unique tickers.")
+print(f"Created updated FALLBACK_TICKERS with {len(FALLBACK_TICKERS)} unique tickers.")
 
