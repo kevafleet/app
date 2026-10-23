@@ -400,8 +400,6 @@ def collect_company(ticker, company="", sector="Unknown",
     return result
 
 
-st.session_state.collected_data.append(result)
-
 
 # ---------------------------------------------------------
 # 3. CONTROLS
