@@ -126,15 +126,48 @@ FALLBACK_TICKERS = [
 ]
 
 # 1. Load company universe
+
 try:
     df = pd.read_csv("universe.csv")
+    df.columns = df.columns.astype(str).str.strip()
+
+    # Detect when Python code was mistakenly saved as CSV
+    if "Ticker" not in df.columns:
+        st.warning(
+            "universe.csv is not a valid company CSV. "
+            "Using the fallback ticker list instead."
+        )
+
+        if "FALLBACK_TICKERS" not in globals():
+            st.error(
+                "FALLBACK_TICKERS is not defined in app.py. "
+                "Define the ticker list before this loading section."
+            )
+            st.stop()
+
+        df = pd.DataFrame({"Ticker": FALLBACK_TICKERS})
+
+except FileNotFoundError:
+    if "FALLBACK_TICKERS" not in globals():
+        st.error("universe.csv is missing and no fallback ticker list exists.")
+        st.stop()
+
+    df = pd.DataFrame({"Ticker": FALLBACK_TICKERS})
+
 except Exception as e:
-    st.error(f"Could not load universe.csv: {e}")
-    st.info(
-        "Ensure universe.csv is in the same GitHub repository "
-        "directory as app.py and is a valid CSV file."
-    )
+    st.error(f"Could not load company data: {e}")
     st.stop()
+
+# Ensure required columns exist
+if "Company" not in df.columns:
+    df["Company"] = df["Ticker"]
+
+if "Sector" not in df.columns:
+    df["Sector"] = "Unknown"
+
+df["Ticker"] = df["Ticker"].astype(str).str.strip().str.upper()
+df = df.drop_duplicates(subset=["Ticker"]).reset_index(drop=True)
+
 
 # Normalize headers before accessing any columns
 df.columns = df.columns.astype(str).str.strip()
