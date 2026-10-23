@@ -97,11 +97,7 @@ FALLBACK_TICKERS = [
     "TNC", "BMI", "XLY", "XLK", "XLF", "XLV", "XLI", "XLE", "XLB", "XLU",
     "XLP", "IYZ", "VNQ", "ITA", "XHB", "XRT", "SMH", "IBB", "KRE", "KBE"
 ]
-unique_tickers = list(dict.fromkeys(FALLBACK_TICKERS))
 
-universe = pd.DataFrame({
-    "Ticker": unique_tickers
-})
 # 1. Load company universe
 try:
     df = pd.read_csv("universe.csv")
